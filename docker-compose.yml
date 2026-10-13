@@ -1,0 +1,97 @@
+# PR-Gate: four containers, least privilege (B5 split, B7 hardening).
+#
+#   edge network      : ngrok <-> backend           (the only path in from the internet: /webhook/github)
+#   internal network  : backend <-> scanner, agent  (not published to the host, not reachable from ngrok)
+#
+# Secrets are handed out per service from .env: the backend gets the GitHub token and webhook secret,
+# the agent gets only the Claude token, ngrok only its authtoken, and the scanner nothing at all.
+
+x-hardened: &hardened
+  read_only: true                       # root filesystem is read-only; writable paths are tmpfs/volumes below
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  pids_limit: 256
+  restart: unless-stopped
+
+services:
+  backend:
+    <<: *hardened
+    build: { context: ./backend, target: backend }
+    image: pr-gate-backend
+    environment:
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
+      WATCHED_REPOS: ${WATCHED_REPOS}
+      VERIFY_TIMEOUT_S: ${VERIFY_TIMEOUT_S:-600}
+      PUBLISH_MIN_SEVERITY: ${PUBLISH_MIN_SEVERITY:-medium}
+      COMMIT_STATUS_ENABLED: ${COMMIT_STATUS_ENABLED:-true}
+      CATCHUP_ON_STARTUP: ${CATCHUP_ON_STARTUP:-true}
+      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-2}
+      SCANNER_URL: http://scanner:9000
+      AGENT_URL: http://agent:9100
+    volumes:
+      - data:/data
+      - workspaces:/workspaces
+    tmpfs:
+      - /tmp:size=256m
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks: [edge, internal]
+    mem_limit: 1g
+    cpus: 1.0
+    depends_on: [scanner, agent]
+
+  scanner:
+    <<: *hardened
+    build: { context: ./backend, target: scanner }
+    image: pr-gate-scanner
+    volumes:
+      - workspaces:/workspaces:ro
+    tmpfs:
+      - /tmp:size=1g
+      - /home/scanner:size=256m,uid=1100,gid=1100,mode=0700
+    networks: [internal]
+    mem_limit: 2g
+    cpus: 2.0
+
+  agent:
+    <<: *hardened
+    build: { context: ./backend, target: agent }
+    image: pr-gate-agent
+    environment:
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN}
+    volumes:
+      - workspaces:/workspaces:ro
+    tmpfs:
+      - /tmp:size=512m
+      - /home/agent:size=256m,uid=1200,gid=1200,mode=0700
+    networks: [internal]
+    mem_limit: 2g
+    cpus: 1.0
+
+  ngrok:
+    <<: *hardened
+    image: ngrok/ngrok:alpine@sha256:85bea0e9c697bdad142b09cd9704420812cc44b5ae417ec4c7ac74d0a49d72f2
+    command: http backend:8000 --url=${NGROK_DOMAIN} --traffic-policy-file=/etc/ngrok/policy.yml
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+      NGROK_CONFIG: /etc/ngrok/ngrok.yml
+    volumes:
+      - ./ngrok/policy.yml:/etc/ngrok/policy.yml:ro
+      - ./ngrok/ngrok.yml:/etc/ngrok/ngrok.yml:ro
+    tmpfs:
+      - /tmp:size=64m
+      - /home/ngrok:size=16m,uid=1000,gid=100,mode=0700
+      - /var/lib/ngrok:size=16m,uid=1000,gid=100,mode=0700   # the entrypoint writes auth-config.yml here
+    networks: [edge]
+    mem_limit: 256m
+    cpus: 0.5
+    depends_on: [backend]
+
+networks:
+  edge: {}
+  internal: {}
+
+volumes:
+  data:
+  workspaces:

@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["results"],
+  "properties": {
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["finding_id", "verdict", "justification"],
+        "properties": {
+          "finding_id": {"type": "string"},
+          "verdict": {"type": "string", "enum": ["confirmed", "false_positive", "unclear"]},
+          "justification": {"type": "string"}
+        }
+      }
+    }
+  }
+}

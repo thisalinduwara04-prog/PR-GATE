@@ -1,0 +1,5 @@
+# Forces Gitleaks built-in rules; a repo-supplied .gitleaks.toml is never used.
+title = "pr-gate"
+
+[extend]
+useDefault = true

@@ -1,0 +1,83 @@
+# Local, offline Semgrep rules for PR-Gate. Rule ids contain no dots (the normaliser keeps the last dotted segment).
+# severity: ERROR -> high, WARNING -> medium, INFO -> low
+rules:
+  - id: python-sqli-string-built-query
+    languages: [python]
+    severity: ERROR
+    message: SQL query built from a formatted/concatenated string is passed to execute(); use parameterised queries.
+    metadata: {cwe: "CWE-89: SQL Injection", category: security}
+    pattern-either:
+      - pattern: $CUR.execute("..." % $X, ...)
+      - pattern: $CUR.execute("...".format(...), ...)
+      - pattern: $CUR.execute(f"...", ...)
+      - pattern: $CUR.execute("..." + $X, ...)
+      - patterns:
+          - pattern-either:
+              - pattern-inside: |
+                  $Q = "..." % $X
+                  ...
+              - pattern-inside: |
+                  $Q = "...".format(...)
+                  ...
+              - pattern-inside: |
+                  $Q = f"..."
+                  ...
+              - pattern-inside: |
+                  $Q = "..." + $X
+                  ...
+          - pattern: $CUR.execute($Q, ...)
+
+  - id: python-subprocess-shell-true
+    languages: [python]
+    severity: WARNING
+    message: Command executed through a shell; untrusted input can lead to command injection.
+    metadata: {cwe: "CWE-78: OS Command Injection", category: security}
+    pattern-either:
+      - pattern: subprocess.$F(..., shell=True, ...)
+      - pattern: os.system(...)
+      - pattern: os.popen(...)
+
+  - id: python-eval-exec-dynamic
+    languages: [python]
+    severity: ERROR
+    message: eval()/exec() on a non-literal value can execute arbitrary code.
+    metadata: {cwe: "CWE-95: Eval Injection", category: security}
+    patterns:
+      - pattern-either:
+          - pattern: eval($X, ...)
+          - pattern: exec($X, ...)
+      - pattern-not: eval("...", ...)
+      - pattern-not: exec("...", ...)
+
+  - id: python-pickle-loads
+    languages: [python]
+    severity: WARNING
+    message: Deserialising data with pickle can execute arbitrary code if the data is untrusted.
+    metadata: {cwe: "CWE-502: Deserialization of Untrusted Data", category: security}
+    pattern-either:
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+
+  - id: python-yaml-unsafe-load
+    languages: [python]
+    severity: WARNING
+    message: yaml.load() without SafeLoader can construct arbitrary Python objects.
+    metadata: {cwe: "CWE-502: Deserialization of Untrusted Data", category: security}
+    patterns:
+      - pattern: yaml.load(...)
+      - pattern-not: yaml.load(..., Loader=yaml.SafeLoader, ...)
+      - pattern-not: yaml.load(..., Loader=SafeLoader, ...)
+
+  - id: python-flask-debug-enabled
+    languages: [python]
+    severity: WARNING
+    message: Flask debug mode exposes the Werkzeug debugger, which allows code execution.
+    metadata: {cwe: "CWE-489: Active Debug Code", category: security}
+    pattern: $APP.run(..., debug=True, ...)
+
+  - id: python-weak-hash-md5
+    languages: [python]
+    severity: INFO
+    message: MD5 is a weak hash; do not use it for passwords or integrity checks.
+    metadata: {cwe: "CWE-328: Use of Weak Hash", category: security}
+    pattern: hashlib.md5(...)
